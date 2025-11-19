@@ -2,35 +2,81 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 
 type Pose = "center" | "left" | "right";
 
 export default function Hero() {
-  const sectionRef = useRef<HTMLElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const [charX, setCharX] = useState(0);
   const [pose, setPose] = useState<Pose>("center");
   const [showCourier, setShowCourier] = useState(false);
 
   const lastMouseXRef = useRef<number | null>(null);
+  const lastScrollLeftRef = useRef<number | null>(null);
   const idleTimeoutRef = useRef<number | null>(null);
 
-  // Ukuran karakter yang lebih kecil dan proporsional
-  const CHAR_WIDTH = 380;
-  const CHAR_HEIGHT = 600;
+  // Dinding 3840x2160 -> 16:9
+  const WALL_ASPECT_RATIO = 3840 / 2160;
+  // Karakter 380x600 (contoh)
+  const CHAR_ASPECT_RATIO = 600 / 380;
 
-  // Posisi awal karakter: tengah layar
+  const [sceneHeight, setSceneHeight] = useState(0);
+  const [sceneWidth, setSceneWidth] = useState(0);
+  const [charWidth, setCharWidth] = useState(0);
+  const [charHeight, setCharHeight] = useState(0);
+  const [isScrollable, setIsScrollable] = useState(false);
+
+  // Hitung dimensi scene & karakter
   useEffect(() => {
-    const section = sectionRef.current;
-    if (!section) return;
+    const updateDimensions = () => {
+      if (typeof window === "undefined") return;
 
-    const rect = section.getBoundingClientRect();
-    const initialX = (rect.width - CHAR_WIDTH) / 2;
-    setCharX(initialX);
-  }, []);
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
 
-  // Bersihin timeout kalau komponen di-unmount
+      const wallWidthFromHeight = vh * WALL_ASPECT_RATIO;
+
+      // kalau wallWidthFromHeight > vw -> device sempit -> scene lebih lebar dari layar -> scroll
+      if (wallWidthFromHeight > vw) {
+        setSceneWidth(wallWidthFromHeight);
+        setIsScrollable(true);
+      } else {
+        // device lebar -> scene = lebar viewport, biar nggak ada gap putih
+        setSceneWidth(vw);
+        setIsScrollable(false);
+      }
+
+      setSceneHeight(vh);
+
+      // Karakter ~80% tinggi layar
+      const charH = vh * 0.8;
+      const charW = charH / CHAR_ASPECT_RATIO;
+      setCharHeight(charH);
+      setCharWidth(charW);
+    };
+
+    updateDimensions();
+    window.addEventListener("resize", updateDimensions);
+    return () => window.removeEventListener("resize", updateDimensions);
+  }, [WALL_ASPECT_RATIO, CHAR_ASPECT_RATIO]);
+
+  // Posisi awal kasir di tengah viewport (saat scrollLeft = 0)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!charWidth) return;
+
+    const vw = window.innerWidth;
+    const initialX = (vw - charWidth) / 2;
+
+    const minX = 0;
+    const maxX = Math.max(sceneWidth - charWidth, 0);
+    const clamped = Math.min(Math.max(initialX, minX), maxX);
+
+    setCharX(clamped);
+  }, [sceneWidth, charWidth]);
+
+  // Bersihkan timeout saat unmount
   useEffect(() => {
     return () => {
       if (idleTimeoutRef.current !== null) {
@@ -39,17 +85,30 @@ export default function Hero() {
     };
   }, []);
 
-  const handleMouseMove = (event: MouseEvent<HTMLElement>) => {
-    const section = sectionRef.current;
-    if (!section) return;
+  const setPoseWithAutoReset = (newPose: Pose) => {
+    setPose(newPose);
 
-    const rect = section.getBoundingClientRect();
-    const relativeX = event.clientX - rect.left;
+    if (idleTimeoutRef.current !== null) {
+      window.clearTimeout(idleTimeoutRef.current);
+    }
+    idleTimeoutRef.current = window.setTimeout(() => {
+      setPose("center");
+    }, 500);
+  };
 
-    // Posisikan karakter mengikuti cursor (tapi tetap di-clamp)
-    const centeredX = relativeX - CHAR_WIDTH / 2;
+  const handleMouseMove = (event: MouseEvent<HTMLDivElement>) => {
+    const scrollEl = scrollRef.current;
+    if (!scrollEl) return;
+
+    const rect = scrollEl.getBoundingClientRect();
+    const scrollLeft = scrollEl.scrollLeft;
+
+    // Posisi X relatif dari awal scene (0 sampai sceneWidth)
+    const relativeX = event.clientX - rect.left + scrollLeft;
+
+    const centeredX = relativeX - charWidth / 2;
     const minX = 0;
-    const maxX = rect.width - CHAR_WIDTH;
+    const maxX = Math.max(sceneWidth - charWidth, 0);
     const clampedX = Math.min(Math.max(centeredX, minX), maxX);
     setCharX(clampedX);
 
@@ -61,162 +120,234 @@ export default function Hero() {
     if (lastX !== null) {
       const delta = currentX - lastX;
       if (Math.abs(delta) > threshold) {
-        if (delta > 0) {
-          setPose("right");
-        } else {
-          setPose("left");
-        }
+        setPoseWithAutoReset(delta > 0 ? "right" : "left");
       }
     }
     lastMouseXRef.current = currentX;
-
-    // Kalau berhenti gerak → balik ke tengah setelah 0.5s
-    if (idleTimeoutRef.current !== null) {
-      window.clearTimeout(idleTimeoutRef.current);
-    }
-    idleTimeoutRef.current = window.setTimeout(() => {
-      setPose("center");
-    }, 500);
   };
 
   const handleMouseLeave = () => {
     setPose("center");
   };
 
-  // Function untuk scroll smooth ke section produk
+  // Kasir mengikuti scroll kiri–kanan + ganti arah sesuai arah scroll
+  const handleScroll = () => {
+    if (typeof window === "undefined") return;
+    const scrollEl = scrollRef.current;
+    if (!scrollEl || !charWidth) return;
+
+    const scrollLeft = scrollEl.scrollLeft;
+    const vw = window.innerWidth;
+
+    // Pusatkan kasir di tengah viewport
+    const desiredX = scrollLeft + (vw - charWidth) / 2;
+    const minX = 0;
+    const maxX = Math.max(sceneWidth - charWidth, 0);
+    const clamped = Math.min(Math.max(desiredX, minX), maxX);
+
+    setCharX(clamped);
+
+    // Deteksi arah scroll
+    const lastScroll = lastScrollLeftRef.current;
+    const threshold = 2; // lebih kecil biar responsif
+
+    if (lastScroll !== null) {
+      const delta = scrollLeft - lastScroll;
+
+      if (Math.abs(delta) > threshold) {
+        setPoseWithAutoReset(delta > 0 ? "right" : "left");
+      }
+    }
+
+    lastScrollLeftRef.current = scrollLeft;
+  };
+
   const scrollToProducts = () => {
-    const productsSection = document.getElementById('products');
+    const productsSection = document.getElementById("products");
     if (productsSection) {
-      productsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      productsSection.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   };
 
   return (
-    <section
-      ref={sectionRef}
-      className="relative h-screen w-full overflow-hidden leading-none"
-      onMouseMove={handleMouseMove}
-      onMouseLeave={handleMouseLeave}
-    >
-      {/* Background dinding */}
-      <Image
-        src="/home/hero/backdrop.png"
-        alt="Ritual Café wall"
-        fill
-        priority
-        className="object-cover"
-        sizes="100vw"
-      />
-
-      {/* PAPAN MENU - Clickable area */}
-      <button
-        onClick={scrollToProducts}
-        className="absolute left-[15.4%] top-[11.2%] z-30 cursor-pointer transition-transform hover:scale-105 active:scale-95"
-        aria-label="Lihat menu produk"
-      >
-        {/* Ini adalah area papan menu - sesuaikan posisi dengan papan menu asli */}
-        <div className="relative h-[115px] w-[410px]">
-          {/* Border putih dengan overlay subtle saat hover */}
-          <div className="absolute inset-0 rounded-lg border-2 border-white/0 bg-white/0 transition-all hover:border-white/80 hover:bg-white/10" />
-        </div>
-      </button>
-
-      {/* PAPAN ORDER NOW - Clickable area */}
-      <button
-        onClick={scrollToProducts}
-        onMouseEnter={() => setShowCourier(true)}
-        onMouseLeave={() => setShowCourier(false)}
-        className="absolute right-[6.7%] top-[26%] z-30 cursor-pointer transition-transform hover:scale-105 active:scale-95"
-        aria-label="Order sekarang"
-      >
-        {/* Area papan ORDER NOW */}
-        <div className="relative h-[80px] w-[140px]">
-          {/* Border putih dengan overlay subtle saat hover */}
-          <div className="absolute inset-0 rounded-lg border-2 border-white/0 bg-white/0 transition-all hover:border-white/80 hover:bg-white/10" />
-        </div>
-      </button>
-
-      {/* Kurir - muncul dari kanan bawah saat hover ORDER NOW */}
+    <section className="relative h-screen w-screen overflow-hidden leading-none">
+      {/* Scroll container: hanya aktif horizontal scroll kalau isScrollable = true */}
       <div
-        className={`pointer-events-none absolute bottom-[-85px] right-[-100] z-30 transition-all duration-500 ease-out ${
-          showCourier ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'
-        }`}
-        style={{ 
-          width: 380,
-          height: 600
-        }}
+        ref={scrollRef}
+        className={`h-full w-full ${
+          isScrollable ? "overflow-x-auto" : "overflow-x-hidden"
+        } overflow-y-hidden`}
+        style={{ height: sceneHeight || "100vh" }}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+        onScroll={handleScroll}
       >
-        <div className="relative h-full w-full">
-          <Image
-            src="/home/hero/kurir.png"
-            alt="Kurir Ritual Café"
-            fill
-            draggable={false}
-            className="select-none object-contain"
+        {/* Scene: lebar = sceneWidth */}
+        <div
+          className="relative h-full"
+          style={{ width: sceneWidth || "100vw" }}
+        >
+          {/* BACKGROUND DINDING */}
+          <div className="absolute inset-0 h-full w-full">
+            <Image
+              src="/home/hero/dinding10.jpg"
+              alt="Ritual Café wall"
+              fill
+              priority
+              className="h-full w-full object-cover"
+              sizes="100vw"
+            />
+          </div>
+
+          {/* PAPAN MENU GRAFIS (menu.png) – di depan dinding, di belakang kasir */}
+          <div
+            className="pointer-events-none absolute z-10"
+            style={{
+              top: sceneHeight * 0.06,
+              left: sceneWidth * 0.5,
+              width: sceneWidth * 0.38,
+              height: sceneHeight * 0.3,
+              transform: "translateX(-50%)",
+            }}
+          >
+            <div className="relative h-full w-full">
+              <Image
+                src="/home/hero/menu.png"
+                alt="Papan menu Ritual Café"
+                fill
+                priority
+                draggable={false}
+                className="object-contain"
+              />
+            </div>
+          </div>
+
+          {/* PAPAN MENU (area klik besar) */}
+          <button
+            onClick={scrollToProducts}
+            className="absolute z-30 cursor-pointer transition-transform hover:scale-105 active:scale-95"
+            style={{
+              left: sceneWidth * 0.154,
+              top: sceneHeight * 0.112,
+              width: sceneWidth * 0.5,
+              height: sceneHeight * 0.35,
+            }}
+            aria-label="Lihat menu produk"
           />
+
+          {/* ORDER (order.png) – kanan atas, trigger kurir, di belakang kasir */}
+          <div
+            className="absolute z-10 cursor-pointer transition-transform hover:scale-105 active:scale-95"
+            style={{
+              right: sceneWidth * 0.06,
+              top: sceneHeight * 0.04,
+              width: sceneWidth * 0.2,
+              height: sceneHeight * 0.3,
+            }}
+            onClick={scrollToProducts}
+            onMouseEnter={() => setShowCourier(true)}
+            onMouseLeave={() => setShowCourier(false)}
+          >
+            <div className="relative h-full w-full">
+              <Image
+                src="/home/hero/order.png"
+                alt="Order sekarang di Ritual Café"
+                fill
+                draggable={false}
+                className="object-contain"
+              />
+            </div>
+          </div>
+
+          {/* KURIR – wrapper statis, isi yang geser */}
+          <div
+            className="pointer-events-none absolute z-30 overflow-hidden"
+            style={{
+              bottom: sceneHeight * -0.08,
+              right: sceneWidth * 0.09,
+              width: charWidth,
+              height: charHeight,
+            }}
+          >
+            <div
+              className={`relative h-full w-full transition-transform duration-500 ease-out ${
+                showCourier ? "translate-x-0" : "translate-x-full"
+              }`}
+            >
+              <Image
+                src="/home/hero/kurir1.png"
+                alt="Kurir Ritual Café"
+                fill
+                draggable={false}
+                className="select-none object-contain"
+              />
+            </div>
+          </div>
+
+          {/* KASIR */}
+          <div
+            className="pointer-events-none absolute left-0 transition-transform duration-150 ease-out"
+            style={{
+              bottom: sceneHeight * 0.08,
+              transform: `translateX(${charX}px)`,
+              width: charWidth,
+              height: charHeight,
+              zIndex: 15,
+            }}
+          >
+            <div className="relative h-full w-full">
+              <Image
+                src="/home/hero/orangtengah.png"
+                alt="Kasir Ritual Café (tengah)"
+                fill
+                priority
+                draggable={false}
+                className={`select-none object-contain transition-opacity duration-200 ${
+                  pose === "center" ? "opacity-100" : "opacity-0"
+                }`}
+              />
+              <Image
+                src="/home/hero/orangkanan.png"
+                alt="Kasir Ritual Café (menghadap kanan)"
+                fill
+                priority
+                draggable={false}
+                className={`absolute inset-0 select-none object-contain transition-opacity duration-200 ${
+                  pose === "right" ? "opacity-100" : "opacity-0"
+                }`}
+              />
+              <Image
+                src="/home/hero/orangkiri.png"
+                alt="Kasir Ritual Café (menghadap kiri)"
+                fill
+                priority
+                draggable={false}
+                className={`absolute inset-0 select-none object-contain transition-opacity duration-200 ${
+                  pose === "left" ? "opacity-100" : "opacity-0"
+                }`}
+              />
+            </div>
+          </div>
+
+          {/* MEJA */}
+          <div
+            className="pointer-events-none absolute left-0 z-20 leading-none"
+            style={{
+              bottom: sceneHeight * -0.08,
+              width: "100%",
+              height: sceneHeight * 0.65,
+            }}
+          >
+            <Image
+              src="/home/hero/meja10.png"
+              alt="Meja kasir Ritual Café"
+              fill
+              priority
+              draggable={false}
+              className="h-full w-full object-cover object-bottom"
+            />
+          </div>
         </div>
-      </div>
-
-      {/* Karakter — di belakang meja (z-10), nempel bawah, ikut cursor */}
-      <div
-        className="pointer-events-none absolute bottom-[40px] left-0 z-10 transition-transform duration-150 ease-out"
-        style={{ 
-          transform: `translateX(${charX}px)`,
-          width: CHAR_WIDTH,
-          height: CHAR_HEIGHT
-        }}
-      >
-        <div className="relative h-full w-full">
-          {/* Pose DIAM (tengah) */}
-          <Image
-            src="/home/hero/orangtengah.png"
-            alt="Kasir Ritual Café (tengah)"
-            fill
-            priority
-            draggable={false}
-            className={`select-none object-contain transition-opacity duration-200 ${
-              pose === "center" ? "opacity-100" : "opacity-0"
-            }`}
-          />
-
-          {/* Pose menghadap KANAN */}
-          <Image
-            src="/home/hero/orangkanan.png"
-            alt="Kasir Ritual Café (menghadap kanan)"
-            fill
-            priority
-            draggable={false}
-            className={`select-none object-contain absolute inset-0 transition-opacity duration-200 ${
-              pose === "right" ? "opacity-100" : "opacity-0"
-            }`}
-          />
-
-          {/* Pose menghadap KIRI */}
-          <Image
-            src="/home/hero/orangkiri.png"
-            alt="Kasir Ritual Café (menghadap kiri)"
-            fill
-            priority
-            draggable={false}
-            className={`select-none object-contain absolute inset-0 transition-opacity duration-200 ${
-              pose === "left" ? "opacity-100" : "opacity-0"
-            }`}
-          />
-        </div>
-      </div>
-
-      {/* Meja paling depan, mentok bawah section */}
-      <div className="pointer-events-none absolute bottom-[-85px] left-0 z-20 w-full leading-none">
-        <Image
-          src="/home/hero/mejafix.png"
-          alt="Meja kasir Ritual Café"
-          width={1920}
-          height={700}
-          priority
-          draggable={false}
-          className="w-full h-auto block align-bottom"
-          style={{ display: 'block', margin: 0, padding: 0, verticalAlign: 'bottom' }}
-        />
       </div>
     </section>
   );
