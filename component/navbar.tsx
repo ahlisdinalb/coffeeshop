@@ -4,10 +4,9 @@ import { useEffect, useState } from "react";
 
 const navItems = [
   { label: "Tentang Kami", href: "#tentang-kami" },
-  { label: "Produk yang Dijual", href: "#product" },
+  { label: "Produk", href: "#product" },
   { label: "Lokasi Outlet", href: "#lokasi" },
   { label: "Career", href: "#career" },
-  { label: "Footer", href: "#footer" },
 ];
 
 export default function Navbar() {

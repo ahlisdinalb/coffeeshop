@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Ritual Café — Coffee Bar",
+  title: "Zentra Café — Coffee Bar",
   description:
     "Coffee bar dengan ambience kayu hangat, barista friendly, dan pengalaman duduk langsung di depan bar.",
 };

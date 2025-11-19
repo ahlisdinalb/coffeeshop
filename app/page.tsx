@@ -25,7 +25,7 @@ export default function Home() {
 
       {/* PRODUK YANG DIJUAL */}
       <section
-        id="product"
+        id="products"
         className="mx-auto max-w-6xl px-6 py-16 md:py-20"
       >
         <h2 className="text-2xl font-semibold text-[#24160f] md:text-3xl">
