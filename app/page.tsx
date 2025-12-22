@@ -13,7 +13,7 @@ export default function Home() {
         className="mx-auto max-w-6xl px-6 py-20 md:py-24"
       >
         <h2 className="text-2xl font-semibold text-[#24160f] md:text-3xl">
-          Tentang Kami
+          Tentang 
         </h2>
         <p className="mt-4 max-w-2xl text-sm leading-relaxed text-[#705041] md:text-base">
           Ritual Café adalah coffee bar yang fokus pada pengalaman duduk di
