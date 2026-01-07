@@ -6,6 +6,8 @@ export default function HomePage() {
   return (
     <main className="min-h-screen bg-[#f5eee6] text-[#24160f]">
       <Hero />
+      <
+
     </main>
   );
 }
